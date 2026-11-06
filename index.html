@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Torneo Fútbol 5</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f4f7f2;--card:#fff;--tx:#14231a;--mut:#5d6f63;--ac:#1f9d55;--acx:#fff;--bd:#d9e3db;--bad:#c0392b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#0f1a13;--card:#18271e;--tx:#e8f2ea;--mut:#9bb0a1;--ac:#3ddc84;--acx:#06210f;--bd:#294235;--bad:#ff7b6b}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0f1a13;--card:#18271e;--tx:#e8f2ea;--mut:#9bb0a1;--ac:#3ddc84;--acx:#06210f;--bd:#294235;--bad:#ff7b6b}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;padding:12px 12px 80px;max-width:640px;margin:0 auto}
+h1{font-size:20px;margin:6px 0 10px}h2{font-size:16px;margin:0 0 6px}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px}
+.tabs button{flex:none}
+button{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px 12px;border-radius:10px;cursor:pointer}
+button.on,button.p{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button.s{padding:5px 9px;font-size:13px}button.d{color:var(--bad)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:10px}
+input,textarea,select{width:100%;font:inherit;padding:9px;margin:4px 0 8px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
+label{font-size:13px;color:var(--mut)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sp{flex:1}
+.tag{font-size:12px;background:var(--bg);border:1px solid var(--bd);border-radius:20px;padding:2px 8px;color:var(--mut)}
+.pro li::marker{content:"＋ "}.con li::marker{content:"－ "}
+ul{margin:4px 0;padding-left:20px}.mut{color:var(--mut);font-size:13px}
+table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:6px;border-top:1px solid var(--bd);width:50%}
+.rk{font-size:20px;font-weight:700;width:34px}
+.wrap{overflow-x:auto}
+.pitch{position:relative;aspect-ratio:5/6;border-radius:12px;margin:8px 0;background:repeating-linear-gradient(0deg,#2e9e55 0 11%,#34ab5c 11% 22%);border:2px solid #fff6;overflow:hidden;touch-action:none}
+.pitch svg{position:absolute;inset:0;width:100%;height:100%}
+.tk{position:absolute;transform:translate(-50%,-50%);text-align:center;touch-action:none;user-select:none;-webkit-user-select:none;width:64px}
+.tk b{display:block;margin:0 auto;width:34px;height:34px;line-height:34px;border-radius:50%;background:#fff;color:#14231a;border:3px solid #1f6fd6;font-size:15px;box-shadow:0 2px 6px #0006}
+.tk span{display:inline-block;margin-top:2px;font-size:11px;color:#fff;background:#0008;border-radius:6px;padding:0 5px;max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pt .tk{cursor:grab}
+.bench{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+</style></head><body>
+<h1>⚽ Torneo Fútbol 5 <button id="out" class="s" style="float:right;display:none" onclick="sb.auth.signOut().then(()=>location.reload())">Salir</button></h1>
+<div id="app" class="mut">Cargando…</div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const lines=t=>String(t||'').split('\n').map(x=>x.trim()).filter(Boolean);
+const S={uid:null,art:false,players:[],squads:[],votes:[],reqs:[],profs:[],tab:'jug',cmp:['',''],edit:null,ready:{}};
+let db=null;
+const prof=()=>S.profs.find(p=>p.id===S.uid);
+const canEd=o=>S.art||o.owner===S.uid||(o.editors||[]).includes(S.uid);
+const isOwn=o=>S.art||o.owner===S.uid;
+const pn=id=>(S.players.find(p=>p.id===id)||{}).name||'?';
+const tally=()=>{const t={};S.votes.forEach(v=>t[v.for]=(t[v.for]||0)+1);return t};
+const col=n=>db.collection(n);
+
+/* ===== CONFIG: pega los datos de tu proyecto Supabase ===== */
+const SB_URL='PEGA_AQUI_TU_URL';
+const SB_KEY='PEGA_AQUI_TU_ANON_KEY';
+const ADMINS=[]; // emails con permiso de admin, ej: ['tu@mail.com']
+const sb=supabase.createClient(SB_URL,SB_KEY);
+function mkDb(){
+  const ref=path=>{const [c,id]=path.split('/');const fail=r=>{if(r.error)throw r.error};return{id,path,
+    set:async d=>fail(await sb.from('docs').upsert({path,col:c,data:d})),
+    update:async d=>{const r=await sb.from('docs').select('data').eq('path',path).maybeSingle();fail(r);fail(await sb.from('docs').upsert({path,col:c,data:{...(r.data?.data||{}),...d}}))},
+    delete:async()=>fail(await sb.from('docs').delete().eq('path',path))}};
+  const collection=c=>({
+    async add(d){const id=crypto.randomUUID();await ref(c+'/'+id).set(d);return ref(c+'/'+id)},
+    onSnapshot(next,err){
+      const load=async()=>{const r=await sb.from('docs').select('path,data').eq('col',c);if(r.error)return err&&err(r.error);next({docs:r.data.map(x=>({id:x.path.split('/')[1],data:()=>x.data}))})};
+      load();const ch=sb.channel('c-'+c+Math.random()).on('postgres_changes',{event:'*',schema:'public',table:'docs',filter:'col=eq.'+c},load).subscribe();
+      return()=>sb.removeChannel(ch)}});
+  return{doc:ref,collection};
+}
+function authView(msg){
+  $('#app').innerHTML=`<div class="card"><h2>Entrar</h2><p class="mut">${msg||'Crea tu cuenta o entra con tu email.'}</p>
+  <label>Email</label><input id="ae" type="email" autocomplete="email"><label>Contraseña (mín. 6)</label><input id="ap" type="password" autocomplete="current-password">
+  <div class="row"><button class="p" onclick="auth(0)">Entrar</button><button onclick="auth(1)">Crear cuenta</button></div></div>`;
+}
+async function auth(up){
+  const c={email:$('#ae').value.trim(),password:$('#ap').value};
+  const r=up?await sb.auth.signUp(c):await sb.auth.signInWithPassword(c);
+  if(r.error)return authView('⚠️ '+r.error.message);
+  if(!r.data.session)return authView('Revisa tu email para confirmar la cuenta.');
+  init();
+}
+async function init(){
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    if(!session)return authView();
+    S.uid=session.user.id;S.art=ADMINS.includes(session.user.email);db=mkDb();$('#out').style.display='';
+    ['players','squads','votes','reqs','profs'].forEach(n=>col(n).onSnapshot(s=>{S[n]=s.docs.map(d=>({id:d.id,...d.data()}));S.ready[n]=1;render()},e=>{$('#app').textContent='Error: '+e.message}));
+  }catch(e){$('#app').textContent='No se pudo cargar: '+(e.message||e)}
+}
+const wr=async f=>{try{await f()}catch(e){alert('No se pudo guardar: '+(e.message||e))}};
+
+function render(){
+  const a=$('#app');
+  if(Object.keys(S.ready).length<5)return;
+  if(!prof()){a.innerHTML=`<div class="card"><h2>Registro</h2><p class="mut">Regístrate para votar, crear jugadores y planteles.</p>
+  <label>Tu nombre</label><input id="rn"><label>Curso / grupo</label><input id="rc"><label>Posición favorita</label><input id="rp">
+  <button class="p" onclick="reg()">Registrarme</button></div>`;return}
+  const tabs=[['jug','Jugadores'],['cmp','Comparar'],['rank','Ranking'],['sq','Planteles']];
+  const pend=S.reqs.filter(r=>{const t=(r.kind==='player'?S.players:S.squads).find(x=>x.id===r.target);return t&&isOwn(t)}).length;
+  a.innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';S.edit=null;render()">${n}${k==='jug'&&pend?' 🔔'+pend:''}</button>`).join('')}</div>`+
+  (S.edit?editor():({jug:vPlayers,cmp:vCmp,rank:vRank,sq:vSquads}[S.tab])());
+}
+function reg(){const n=$('#rn').value.trim();if(!n)return alert('Escribe tu nombre');
+  wr(()=>db.doc('profs/'+S.uid).set({name:n,curso:$('#rc').value.trim(),pos:$('#rp').value.trim()}))}
+
+/* Jugadores */
+function reqBtns(kind,o){
+  const mine=S.reqs.find(r=>r.id===`${kind}_${o.id}_${S.uid}`);
+  let h='';
+  if(!canEd(o))h+=mine?'<span class="tag">Permiso pedido…</span>':`<button class="s" onclick="ask('${kind}','${o.id}')">Pedir permiso</button>`;
+  if(isOwn(o))S.reqs.filter(r=>r.kind===kind&&r.target===o.id).forEach(r=>{h+=`<div class="row mut" style="width:100%">${esc(r.fromName)} pide editar <button class="s p" onclick="grant('${r.id}')">Aprobar</button><button class="s" onclick="deny('${r.id}')">Rechazar</button></div>`});
+  return h;
+}
+function vPlayers(){
+  const t=tally();
+  return `<button class="p" onclick="S.edit={type:'player'};render()">+ Nuevo jugador</button><div style="height:10px"></div>`+
+  (S.players.length?S.players.map(p=>`<div class="card"><div class="row"><h2 class="sp">${esc(p.name)}</h2><span class="tag">${esc(p.team||'Sin equipo')}</span><span class="tag">⭐ ${t[p.id]||0}</span></div>
+  <div class="mut">${esc(p.pos||'')}</div>
+  <b>Pros</b><ul class="pro">${(p.pros||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li class="mut">—</li>'}</ul>
+  <b>Contras</b><ul class="con">${(p.cons||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li class="mut">—</li>'}</ul>
+  <div class="row">${canEd(p)?`<button class="s" onclick="S.edit={type:'player',id:'${p.id}'};render()">Editar</button>`:''}${isOwn(p)?`<button class="s d" onclick="del('players','${p.id}')">Borrar</button>`:''}${reqBtns('player',p)}</div></div>`).join(''):'<p class="mut">Aún no hay jugadores. ¡Crea el primero!</p>');
+}
+/* Comparar */
+function vCmp(){
+  const sel=i=>`<select onchange="S.cmp[${i}]=this.value;render()"><option value="">Elegir…</option>${S.players.map(p=>`<option value="${p.id}" ${S.cmp[i]===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`;
+  const [a,b]=S.cmp.map(id=>S.players.find(p=>p.id===id));const t=tally();
+  const li=(x,c)=>`<ul class="${c}">${(x||[]).map(y=>`<li>${esc(y)}</li>`).join('')}</ul>`;
+  let tb='';
+  if(a&&b)tb=`<div class="card wrap"><table>
+  <tr><td><b>${esc(a.name)}</b></td><td><b>${esc(b.name)}</b></td></tr>
+  <tr><td>${esc(a.team||'—')}<br><span class="mut">${esc(a.pos||'')}</span></td><td>${esc(b.team||'—')}<br><span class="mut">${esc(b.pos||'')}</span></td></tr>
+  <tr><td>⭐ ${t[a.id]||0} votos</td><td>⭐ ${t[b.id]||0} votos</td></tr>
+  <tr><td>${li(a.pros,'pro')}</td><td>${li(b.pros,'pro')}</td></tr>
+  <tr><td>${li(a.cons,'con')}</td><td>${li(b.cons,'con')}</td></tr></table></div>`;
+  return `<div class="card"><label>Jugador 1</label>${sel(0)}<label>Jugador 2</label>${sel(1)}</div>${tb}`;
+}
+/* Ranking */
+function vRank(){
+  const t=tally(),my=S.votes.find(v=>v.id===S.uid);
+  const l=[...S.players].sort((x,y)=>(t[y.id]||0)-(t[x.id]||0));
+  return `<p class="mut">Un voto por persona. Puedes cambiarlo cuando quieras; no puedes votar por tu propia ficha.</p>`+
+  l.map((p,i)=>`<div class="card row"><div class="rk">${i+1}</div><div class="sp"><b>${esc(p.name)}</b><div class="mut">${esc(p.team||'')}</div></div><b>${t[p.id]||0}</b>
+  ${p.owner===S.uid?'':`<button class="s ${my&&my.for===p.id?'p':''}" onclick="vote('${p.id}')">${my&&my.for===p.id?'Tu voto':'Votar'}</button>`}</div>`).join('')||'<p class="mut">Sin jugadores todavía.</p>';
+}
+const vote=id=>wr(()=>db.doc('votes/'+S.uid).set({for:id}));
+/* Planteles */
+function vSquads(){
+  return `<button class="p" onclick="S.edit={type:'squad'};render()">+ Nuevo plantel</button><div style="height:10px"></div>`+
+  (S.squads.map(q=>{const ids=q.players||[];return `<div class="card"><div class="row"><h2 class="sp">${esc(q.name)}</h2><span class="tag">${ids.length}/7</span></div>
+  ${pitch(ids,q.pos||{},false)}
+  
+  <div class="row">${canEd(q)?`<button class="s" onclick="S.edit={type:'squad',id:'${q.id}'};render()">Editar</button>`:''}${isOwn(q)?`<button class="s d" onclick="del('squads','${q.id}')">Borrar</button>`:''}${reqBtns('squad',q)}</div></div>`}).join('')||'<p class="mut">Aún no hay planteles.</p>');
+}
+/* Editor */
+function editor(){
+  const e=S.edit;
+  if(e.type==='player'){
+    const p=S.players.find(x=>x.id===e.id)||{};
+    return `<div class="card"><h2>${p.id?'Editar':'Nuevo'} jugador</h2>
+    <label>Nombre</label><input id="f1" value="${esc(p.name)}"><label>Equipo</label><input id="f2" value="${esc(p.team)}">
+    <label>Posición</label><input id="f3" value="${esc(p.pos)}">
+    <label>Pros (uno por línea)</label><textarea id="f4" rows="4">${esc((p.pros||[]).join('\n'))}</textarea>
+    <label>Contras (uno por línea)</label><textarea id="f5" rows="4">${esc((p.cons||[]).join('\n'))}</textarea>
+    <div class="row"><button class="p" onclick="savePlayer('${p.id||''}')">Guardar</button><button onclick="S.edit=null;render()">Cancelar</button></div></div>`;
+  }
+  const q=S.squads.find(x=>x.id===e.id)||{};e.sel=e.sel||[...(q.players||[])];e.pos=e.pos||{...(q.pos||{})};
+  return `<div class="card"><h2>${q.id?'Editar':'Nuevo'} plantel</h2><label>Nombre del equipo</label><input id="f1" value="${esc(e.name??q.name)}" oninput="S.edit.name=this.value">
+  ${pitch(e.sel,e.pos,true)}<p class="mut">Arrastra a cada jugador en la cancha; toca su camiseta para cambiar el número. Elige hasta 7 abajo: los 5 primeros juegan y los 2 últimos son suplentes.</p>
+  ${S.players.map(p=>{const i=e.sel.indexOf(p.id);return `<button class="s ${i>=0?'p':''}" style="margin:2px" onclick="tg('${p.id}')">${i>=0?(i<5?'T':'S')+(i+1)+' · ':''}${esc(p.name)}</button>`}).join('')}
+  <div class="row" style="margin-top:10px"><button class="p" onclick="saveSquad('${q.id||''}')">Guardar</button><button onclick="S.edit=null;render()">Cancelar</button></div></div>`;
+}
+function tg(id){const s=S.edit.sel,i=s.indexOf(id);if(i>=0){s.splice(i,1);delete S.edit.pos[id]}else if(s.length<7){s.push(id);S.edit.pos[id]=gp({},id,s.length-1)}else alert('Máximo 7 jugadores');render()}
+const DEF=[[50,86],[27,64],[73,64],[32,30],[68,30]];
+const gp=(pos,id,i)=>pos[id]||{x:DEF[i]?DEF[i][0]:50,y:DEF[i]?DEF[i][1]:50,n:i+1};
+function pitch(ids,pos,ed){
+  const tk=(id,i)=>{const p=gp(pos,id,i);return `<div class="tk" data-id="${id}" style="left:${p.x}%;top:${p.y}%"><b>${esc(p.n)}</b><span>${esc(pn(id).split(' ')[0])}</span></div>`};
+  const ln='stroke="#fff" stroke-opacity=".7" stroke-width=".6" fill="none"';
+  return `<div class="pitch" ${ed?'id="pt"':''}><svg viewBox="0 0 100 120" preserveAspectRatio="none"><rect x="3" y="3" width="94" height="114" ${ln}/><line x1="3" y1="60" x2="97" y2="60" ${ln}/><circle cx="50" cy="60" r="11" ${ln}/><rect x="26" y="3" width="48" height="18" ${ln}/><rect x="26" y="99" width="48" height="18" ${ln}/></svg>${ids.slice(0,5).map((id,i)=>tk(id,i)).join('')}</div>`+
+  `<div class="bench"><span class="mut">Suplentes:</span>${ids.slice(5).map((id,k)=>{const p=gp(pos,id,k+5);return `<span class="tag" ${ed?`onclick="setN('${id}')"`:''}>${esc(p.n)} · ${esc(pn(id))}</span>`}).join('')||'<span class="mut">—</span>'}</div>`;
+}
+function setN(id){const e=S.edit,i=e.sel.indexOf(id),c=gp(e.pos,id,i),n=prompt('Número de camiseta',c.n);if(n!==null){e.pos[id]={...c,n:n.slice(0,2)};render()}}
+document.addEventListener('pointerdown',ev=>{
+  const t=ev.target.closest('#pt .tk');if(!t||!S.edit)return;ev.preventDefault();
+  const r=$('#pt').getBoundingClientRect(),id=t.dataset.id,e=S.edit;let moved=null;
+  const mv=x=>{moved=[Math.min(94,Math.max(6,(x.clientX-r.left)/r.width*100)),Math.min(94,Math.max(6,(x.clientY-r.top)/r.height*100))];t.style.left=moved[0]+'%';t.style.top=moved[1]+'%'};
+  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up);removeEventListener('pointercancel',up);
+    const c=gp(e.pos,id,e.sel.indexOf(id));
+    if(moved)e.pos[id]={...c,x:moved[0],y:moved[1]};else setN(id)};
+  addEventListener('pointermove',mv);addEventListener('pointerup',up);addEventListener('pointercancel',up);
+});
+function savePlayer(id){
+  const n=$('#f1').value.trim();if(!n)return alert('Falta el nombre');
+  const d={name:n,team:$('#f2').value.trim(),pos:$('#f3').value.trim(),pros:lines($('#f4').value),cons:lines($('#f5').value)};
+  wr(async()=>{if(id)await db.doc('players/'+id).update(d);else await col('players').add({...d,owner:S.uid,editors:[]});S.edit=null;render()});
+}
+function saveSquad(id){
+  const e=S.edit,n=(e.name??(S.squads.find(x=>x.id===id)||{}).name??'').trim();if(!n)return alert('Falta el nombre');
+  const pos={};e.sel.forEach((i,k)=>pos[i]=gp(e.pos,i,k));const d={name:n,players:e.sel,pos};
+  wr(async()=>{if(id)await db.doc('squads/'+id).update(d);else await col('squads').add({...d,owner:S.uid,editors:[]});S.edit=null;render()});
+}
+const del=(c,id)=>confirm('¿Borrar?')&&wr(()=>db.doc(c+'/'+id).delete());
+const ask=(kind,target)=>wr(()=>db.doc(`reqs/${kind}_${target}_${S.uid}`).set({kind,target,from:S.uid,fromName:prof().name}));
+function grant(id){const r=S.reqs.find(x=>x.id===id);const o=(r.kind==='player'?S.players:S.squads).find(x=>x.id===r.target);
+  wr(async()=>{await db.doc((r.kind==='player'?'players/':'squads/')+o.id).update({editors:[...new Set([...(o.editors||[]),r.from])]});await db.doc('reqs/'+id).delete()})}
+const deny=id=>wr(()=>db.doc('reqs/'+id).delete());
+init();
+</script></body></html>
