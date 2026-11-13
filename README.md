@@ -6,4 +6,4 @@
 4. Sube estos archivos a un repo de GitHub y conéctalo a Vercel (sin build, es estático).
 .
    
-saasdsdsda
+saasdsd
